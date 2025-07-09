@@ -1,0 +1,75 @@
+# {{.AppName}} Makefile
+
+.PHONY: build run test clean help dev migrate-up migrate-down
+
+# Build the application
+build:
+	go build -o bin/{{.AppName}} ./cmd/{{.AppName}}
+
+# Run the application
+run: build
+	./bin/{{.AppName}} serve
+
+# Run in development mode
+dev:
+	go run ./cmd/{{.AppName}} serve
+
+# Run tests
+test:
+	go test -v ./...
+
+# Run tests with coverage
+test-coverage:
+	go test -v -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+
+# Clean build artifacts
+clean:
+	rm -rf bin/
+	rm -f coverage.out coverage.html
+
+# Run database migrations up
+migrate-up:
+	go run ./cmd/{{.AppName}} migrate up
+
+# Run database migrations down
+migrate-down:
+	go run ./cmd/{{.AppName}} migrate down
+
+# Check migration status
+migrate-status:
+	go run ./cmd/{{.AppName}} migrate status
+
+# Format code
+fmt:
+	go fmt ./...
+
+# Run linting
+lint:
+	golangci-lint run
+
+# Tidy dependencies
+tidy:
+	go mod tidy
+
+# Install dependencies
+deps:
+	go get ./...
+
+# Help
+help:
+	@echo "Available commands:"
+	@echo "  build         - Build the application"
+	@echo "  run           - Build and run the application"
+	@echo "  dev           - Run in development mode"
+	@echo "  test          - Run tests"
+	@echo "  test-coverage - Run tests with coverage"
+	@echo "  clean         - Clean build artifacts"
+	@echo "  migrate-up    - Run database migrations up"
+	@echo "  migrate-down  - Run database migrations down"
+	@echo "  migrate-status- Check migration status"
+	@echo "  fmt           - Format code"
+	@echo "  lint          - Run linting"
+	@echo "  tidy          - Tidy dependencies"
+	@echo "  deps          - Install dependencies"
+	@echo "  help          - Show this help"

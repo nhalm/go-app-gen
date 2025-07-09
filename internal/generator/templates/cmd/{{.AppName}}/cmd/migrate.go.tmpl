@@ -1,0 +1,171 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/spf13/cobra"
+
+	"{{.ModuleName}}/internal/utils"
+	"{{.ModuleName}}/internal/utils/database"
+)
+
+// migrateCmd represents the migrate command
+var migrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "Run database migrations",
+	Long: `Run database migrations for the {{.AppName}} application.
+	
+This command handles database schema migrations including:
+- Running pending migrations
+- Rolling back migrations
+- Checking migration status
+
+Examples:
+  {{.AppName}} migrate up      # Run all pending migrations
+  {{.AppName}} migrate down    # Rollback the last migration
+  {{.AppName}} migrate status  # Check migration status`,
+}
+
+var (
+	migrateUpCmd = &cobra.Command{
+		Use:   "up",
+		Short: "Run all pending migrations",
+		Long:  "Run all pending database migrations to bring the schema up to date",
+		RunE:  runMigrateUp,
+	}
+	
+	migrateDownCmd = &cobra.Command{
+		Use:   "down",
+		Short: "Rollback the last migration",
+		Long:  "Rollback the last applied database migration",
+		RunE:  runMigrateDown,
+	}
+	
+	migrateStatusCmd = &cobra.Command{
+		Use:   "status",
+		Short: "Check migration status",
+		Long:  "Check the current status of database migrations",
+		RunE:  runMigrateStatus,
+	}
+)
+
+func init() {
+	migrateCmd.AddCommand(migrateUpCmd)
+	migrateCmd.AddCommand(migrateDownCmd)
+	migrateCmd.AddCommand(migrateStatusCmd)
+}
+
+func RegisterMigrateCommand(rootCmd *cobra.Command) {
+	rootCmd.AddCommand(migrateCmd)
+}
+
+func runMigrateUp(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	
+	// Initialize logger
+	logger := utils.NewLogger()
+	slog.SetDefault(logger)
+	
+	slog.Info("Running database migrations...")
+	
+	m, err := createMigrator(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create migrator: %w", err)
+	}
+	defer m.Close()
+	
+	if err := m.Up(); err != nil {
+		if err == migrate.ErrNoChange {
+			slog.Info("No migrations to run")
+			return nil
+		}
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+	
+	slog.Info("Migrations completed successfully")
+	return nil
+}
+
+func runMigrateDown(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	
+	// Initialize logger
+	logger := utils.NewLogger()
+	slog.SetDefault(logger)
+	
+	slog.Info("Rolling back last migration...")
+	
+	m, err := createMigrator(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create migrator: %w", err)
+	}
+	defer m.Close()
+	
+	if err := m.Steps(-1); err != nil {
+		if err == migrate.ErrNoChange {
+			slog.Info("No migrations to rollback")
+			return nil
+		}
+		return fmt.Errorf("failed to rollback migration: %w", err)
+	}
+	
+	slog.Info("Migration rolled back successfully")
+	return nil
+}
+
+func runMigrateStatus(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	
+	// Initialize logger
+	logger := utils.NewLogger()
+	slog.SetDefault(logger)
+	
+	m, err := createMigrator(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create migrator: %w", err)
+	}
+	defer m.Close()
+	
+	version, dirty, err := m.Version()
+	if err != nil {
+		if err == migrate.ErrNilVersion {
+			slog.Info("No migrations have been run")
+			return nil
+		}
+		return fmt.Errorf("failed to get migration status: %w", err)
+	}
+	
+	slog.Info("Migration status", "version", version, "dirty", dirty)
+	return nil
+}
+
+func createMigrator(ctx context.Context) (*migrate.Migrate, error) {
+	// Connect to database
+	db, err := database.Connect(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	
+	// Create postgres driver
+	driver, err := postgres.WithInstance(db.DB, &postgres.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create postgres driver: %w", err)
+	}
+	
+	// Create migrator
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://internal/database/migrations",
+		"postgres",
+		driver,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create migrator: %w", err)
+	}
+	
+	return m, nil
+}

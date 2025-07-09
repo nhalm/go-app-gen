@@ -1,0 +1,124 @@
+# {{.AppName}}
+
+{{.Description}}
+
+## Features
+
+- 🏗️ Clean architecture with clear separation of concerns
+- 🚀 Fast HTTP server with Chi router
+- 🗄️ Database integration with PostgreSQL
+- 🔄 Database migrations with golang-migrate
+- 📊 Structured logging with slog
+- 🧪 Comprehensive testing setup
+- 📦 Docker support
+- 🔧 Development tooling (Makefile, linting, etc.)
+
+## Quick Start
+
+### Prerequisites
+
+- Go 1.23 or higher
+- PostgreSQL
+- Make (optional, for convenience commands)
+
+### Installation
+
+1. Clone the repository
+2. Copy the environment file:
+   ```bash
+   cp .env.example .env
+   ```
+3. Update the database configuration in `.env`
+4. Install dependencies:
+   ```bash
+   make deps
+   ```
+
+### Running the Application
+
+1. Run database migrations:
+   ```bash
+   make migrate-up
+   ```
+
+2. Start the server:
+   ```bash
+   make dev
+   ```
+
+The server will start at `http://localhost:8080`
+
+### Available Commands
+
+```bash
+make help  # Show all available commands
+```
+
+## API Endpoints
+
+- `GET /health` - Health check endpoint
+- `GET /api/v1/{{.DomainPlural}}` - List {{.DomainPlural}} (TODO)
+- `POST /api/v1/{{.DomainPlural}}` - Create {{.Domain}} (TODO)
+- `GET /api/v1/{{.DomainPlural}}/{id}` - Get {{.Domain}} by ID (TODO)
+- `PUT /api/v1/{{.DomainPlural}}/{id}` - Update {{.Domain}} (TODO)
+- `DELETE /api/v1/{{.DomainPlural}}/{id}` - Delete {{.Domain}} (TODO)
+
+## Project Structure
+
+```
+{{.AppName}}/
+├── cmd/{{.AppName}}/           # Application entry point
+│   ├── cmd/                    # Cobra commands
+│   └── main.go                 # Main function
+├── internal/
+│   ├── api/                    # HTTP handlers and routes
+│   ├── service/                # Business logic
+│   ├── repository/             # Data access layer
+│   └── utils/                  # Utilities and helpers
+├── migrations/                 # Database migrations
+├── Makefile                    # Build and development commands
+├── .env.example               # Environment configuration example
+└── README.md                  # This file
+```
+
+## Development
+
+### Testing
+
+```bash
+make test                # Run all tests
+make test-coverage      # Run tests with coverage
+```
+
+### Database Migrations
+
+```bash
+make migrate-up         # Run pending migrations
+make migrate-down       # Rollback last migration
+make migrate-status     # Check migration status
+```
+
+### Code Quality
+
+```bash
+make fmt               # Format code
+make lint              # Run linting
+make tidy              # Tidy dependencies
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Run tests and ensure they pass
+6. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
+
+Generated with [go-app-gen](https://github.com/nhalm/go-app-gen)

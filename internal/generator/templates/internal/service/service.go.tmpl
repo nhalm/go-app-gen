@@ -1,0 +1,52 @@
+package service
+
+import (
+	"context"
+	"time"
+)
+
+// Service provides business logic for {{.Domain}} operations
+type Service struct {
+	repo Repository
+}
+
+// Repository interface defines the data access methods
+type Repository interface {
+	// Add your repository methods here
+	Ping(ctx context.Context) error
+}
+
+// New creates a new service instance
+func New(repo Repository) *Service {
+	return &Service{
+		repo: repo,
+	}
+}
+
+// HealthStatus represents the health status of the service
+type HealthStatus struct {
+	Status    string    `json:"status"`
+	Timestamp time.Time `json:"timestamp"`
+	Version   string    `json:"version"`
+	Database  string    `json:"database"`
+}
+
+// GetHealth returns the health status of the service
+func (s *Service) GetHealth(ctx context.Context) (*HealthStatus, error) {
+	status := &HealthStatus{
+		Status:    "healthy",
+		Timestamp: time.Now(),
+		Version:   "dev", // This should be injected at build time
+		Database:  "unknown",
+	}
+	
+	// Check database connectivity
+	if err := s.repo.Ping(ctx); err != nil {
+		status.Status = "unhealthy"
+		status.Database = "disconnected"
+		return status, nil
+	}
+	
+	status.Database = "connected"
+	return status, nil
+}

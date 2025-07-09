@@ -1,0 +1,17 @@
+package utils
+
+import (
+	"log/slog"
+	"os"
+)
+
+// NewLogger creates a new structured logger
+func NewLogger() *slog.Logger {
+	// For now, use a simple text handler
+	// In production, you might want to use JSON format
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+	
+	return slog.New(handler)
+}
