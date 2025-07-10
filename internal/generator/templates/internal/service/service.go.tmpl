@@ -2,51 +2,166 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"{{.ModuleName}}/internal/repository"
+	"{{.ModuleName}}/internal/repository/sqlc"
 )
 
-// Service provides business logic for {{.Domain}} operations
-type Service struct {
-	repo Repository
+const (
+	// No pagination constants needed
+)
+
+var (
+	// ErrNotFound is returned when a {{.DomainLower}} is not found
+	ErrNotFound = errors.New("{{.DomainLower}} not found")
+
+	// ErrInvalidInput is returned when input validation fails
+	ErrInvalidInput = errors.New("invalid input")
+
+	// ErrRepoNotFound is an alias for repository.ErrNotFound
+	ErrRepoNotFound = repository.ErrNotFound
+)
+
+// ServiceInterface defines the service layer interface
+type ServiceInterface interface {
+	Create{{.DomainTitle}}(ctx context.Context, req *Create{{.DomainTitle}}Request) (*{{.DomainTitle}}, error)
+	Get{{.DomainTitle}}(ctx context.Context, id uuid.UUID) (*{{.DomainTitle}}, error)
+	Update{{.DomainTitle}}(ctx context.Context, id uuid.UUID, req *Update{{.DomainTitle}}Request) (*{{.DomainTitle}}, error)
+	Delete{{.DomainTitle}}(ctx context.Context, id uuid.UUID) error
+	List{{.DomainTitle}}s(ctx context.Context) ([]*{{.DomainTitle}}, error)
 }
 
-// Repository interface defines the data access methods
-type Repository interface {
-	// Add your repository methods here
-	Ping(ctx context.Context) error
+// RepositoryInterface defines what the service needs from the repository
+type RepositoryInterface interface {
+	Create{{.DomainTitle}}(ctx context.Context, params *sqlc.Create{{.DomainTitle}}Params) (*sqlc.{{.DomainTitle}}, error)
+	Get{{.DomainTitle}}(ctx context.Context, id uuid.UUID) (*sqlc.{{.DomainTitle}}, error)
+	Update{{.DomainTitle}}(ctx context.Context, params *sqlc.Update{{.DomainTitle}}Params) (*sqlc.{{.DomainTitle}}, error)
+	SoftDelete{{.DomainTitle}}(ctx context.Context, id uuid.UUID) error
+	List{{.DomainTitle}}s(ctx context.Context) ([]*sqlc.{{.DomainTitle}}, error)
+}
+
+// Service implements business logic for {{.DomainPlural}}
+type Service struct {
+	repo RepositoryInterface
 }
 
 // New creates a new service instance
-func New(repo Repository) *Service {
-	return &Service{
-		repo: repo,
-	}
+func New(repo RepositoryInterface) *Service {
+	return &Service{repo: repo}
 }
 
-// HealthStatus represents the health status of the service
-type HealthStatus struct {
-	Status    string    `json:"status"`
-	Timestamp time.Time `json:"timestamp"`
-	Version   string    `json:"version"`
-	Database  string    `json:"database"`
+// Create{{.DomainTitle}} creates a new {{.DomainLower}}
+func (s *Service) Create{{.DomainTitle}}(ctx context.Context, req *Create{{.DomainTitle}}Request) (*{{.DomainTitle}}, error) {
+	if req.Name == "" {
+		return nil, fmt.Errorf("%w: name is required", ErrInvalidInput)
+	}
+
+	// Validate date range
+	if req.EffectiveStart != nil && req.EffectiveEnd != nil {
+		if req.EffectiveStart.After(*req.EffectiveEnd) {
+			return nil, fmt.Errorf("%w: effective start must be before effective end", ErrInvalidInput)
+		}
+	}
+
+	params := &sqlc.Create{{.DomainTitle}}Params{
+		Name:           req.Name,
+		Description:    req.Description,
+		EffectiveStart: req.EffectiveStart,
+		EffectiveEnd:   req.EffectiveEnd,
+	}
+
+	dbModel, err := s.repo.Create{{.DomainTitle}}(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create {{.DomainLower}}: %w", err)
+	}
+
+	return s.toServiceModel(dbModel), nil
 }
 
-// GetHealth returns the health status of the service
-func (s *Service) GetHealth(ctx context.Context) (*HealthStatus, error) {
-	status := &HealthStatus{
-		Status:    "healthy",
-		Timestamp: time.Now(),
-		Version:   "dev", // This should be injected at build time
-		Database:  "unknown",
+// Get{{.DomainTitle}} retrieves a {{.DomainLower}} by ID
+func (s *Service) Get{{.DomainTitle}}(ctx context.Context, id uuid.UUID) (*{{.DomainTitle}}, error) {
+	dbModel, err := s.repo.Get{{.DomainTitle}}(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrRepoNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get {{.DomainLower}}: %w", err)
 	}
-	
-	// Check database connectivity
-	if err := s.repo.Ping(ctx); err != nil {
-		status.Status = "unhealthy"
-		status.Database = "disconnected"
-		return status, nil
+
+	return s.toServiceModel(dbModel), nil
+}
+
+// Update{{.DomainTitle}} updates an existing {{.DomainLower}}
+func (s *Service) Update{{.DomainTitle}}(ctx context.Context, id uuid.UUID, req *Update{{.DomainTitle}}Request) (*{{.DomainTitle}}, error) {
+	// Check if at least one field is being updated
+	if req.Name == nil && req.Description == nil {
+		return nil, fmt.Errorf("%w: no fields to update", ErrInvalidInput)
 	}
-	
-	status.Database = "connected"
-	return status, nil
+
+	// Validate name if provided
+	if req.Name != nil && *req.Name == "" {
+		return nil, fmt.Errorf("%w: name cannot be empty", ErrInvalidInput)
+	}
+
+	params := &sqlc.Update{{.DomainTitle}}Params{
+		ID:          id,
+		Name:        req.Name,
+		Description: req.Description,
+	}
+
+	dbModel, err := s.repo.Update{{.DomainTitle}}(ctx, params)
+	if err != nil {
+		if errors.Is(err, ErrRepoNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to update {{.DomainLower}}: %w", err)
+	}
+
+	return s.toServiceModel(dbModel), nil
+}
+
+// Delete{{.DomainTitle}} soft deletes a {{.DomainLower}}
+func (s *Service) Delete{{.DomainTitle}}(ctx context.Context, id uuid.UUID) error {
+	err := s.repo.SoftDelete{{.DomainTitle}}(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete {{.DomainLower}}: %w", err)
+	}
+
+	return nil
+}
+
+// List{{.DomainTitle}}s retrieves a paginated list of {{.DomainPlural}}
+func (s *Service) List{{.DomainTitle}}s(ctx context.Context) ([]*{{.DomainTitle}}, error) {
+	items, err := s.repo.List{{.DomainTitle}}s(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list {{.DomainPlural}}: %w", err)
+	}
+
+	// Convert to service models
+	serviceItems := make([]*{{.DomainTitle}}, len(items))
+	for i, item := range items {
+		serviceItems[i] = s.toServiceModel(item)
+	}
+
+	return serviceItems, nil
+}
+
+// Model conversion helpers
+
+func (s *Service) toServiceModel(db *sqlc.{{.DomainTitle}}) *{{.DomainTitle}} {
+	return &{{.DomainTitle}}{
+		ID:             db.ID,
+		Name:           db.Name,
+		Description:    db.Description,
+		EffectiveStart: db.EffectiveStart.Time,
+		EffectiveEnd:   db.EffectiveEnd.Time,
+		CreatedAt:      db.CreatedAt.Time,
+		UpdatedAt:      db.UpdatedAt.Time,
+	}
 }

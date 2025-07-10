@@ -1,0 +1,158 @@
+package cmd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/spf13/cobra"
+
+	"{{.ModuleName}}/internal/api"
+	"{{.ModuleName}}/internal/service"
+	"{{.ModuleName}}/internal/repository"
+	"{{.ModuleName}}/internal/utils"
+)
+
+const (
+	requestTimeoutSeconds    = 60
+	shutdownTimeoutSeconds   = 30
+	readHeaderTimeoutSeconds = 60
+	readTimeoutSeconds       = 30
+	writeTimeoutSeconds      = 120
+	idleTimeoutSeconds       = 120
+)
+
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Start the {{.AppName}} API server",
+	Long:  `Start the {{.AppName}} API server with HTTP endpoints for {{.Domain}} management.`,
+	RunE:  runServe,
+}
+
+func RegisterServeCommand(rootCmd *cobra.Command) {
+	rootCmd.AddCommand(serveCmd)
+}
+
+func runServe(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
+	// Setup logging
+	logLevel := getEnv("LOG_LEVEL", "info")
+	logFormat := getEnv("LOG_FORMAT", "text")
+	setupLogger(logLevel, logFormat)
+
+	// Get configuration from environment
+	port := getEnv("HTTP_PORT", "8080")
+	host := getEnv("HTTP_HOST", "0.0.0.0")
+
+	slog.Info("Starting {{.AppName}} server",
+		slog.String("host", host),
+		slog.String("port", port),
+		slog.String("version", version))
+
+	// Initialize database connection
+	dsn := getEnv("DATABASE_URL", "postgres://user:password@localhost:5432/{{.AppName}}?sslmode=disable")
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	defer db.Close()
+
+	// Check database connectivity
+	if err := db.Ping(ctx); err != nil {
+		return fmt.Errorf("database is not ready: %w", err)
+	}
+
+	// Initialize layers
+	repo := repository.New(db)
+	svc := service.New(repo)
+	handler := api.NewHandler(svc)
+
+	// Setup router
+	r := chi.NewRouter()
+
+	// Middleware
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(utils.RequestLoggerMiddleware())
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Timeout(requestTimeoutSeconds * time.Second))
+
+	// Register routes
+	api.RegisterRoutes(r, handler)
+
+	// Create server
+	srv := &http.Server{
+		Addr:              fmt.Sprintf("%s:%s", host, port),
+		Handler:           r,
+		ReadHeaderTimeout: readHeaderTimeoutSeconds * time.Second,
+		ReadTimeout:       readTimeoutSeconds * time.Second,
+		WriteTimeout:      writeTimeoutSeconds * time.Second,
+		IdleTimeout:       idleTimeoutSeconds * time.Second,
+	}
+
+	// Start server in goroutine
+	go func() {
+		slog.Info("Server listening", slog.String("address", srv.Addr))
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("Server error", slog.String("error", err.Error()))
+		}
+	}()
+
+	// Wait for interrupt
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	// Graceful shutdown
+	slog.Info("Shutting down server...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeoutSeconds*time.Second)
+
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("server shutdown failed: %w", err)
+	}
+
+	slog.Info("Server stopped")
+	return nil
+}
+
+func setupLogger(level, format string) {
+	var logLevel slog.Level
+
+	switch level {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "info":
+		logLevel = slog.LevelInfo
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{Level: logLevel}
+
+	var handler slog.Handler
+	if format == "json" {
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	}
+
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+}

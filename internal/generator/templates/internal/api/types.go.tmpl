@@ -1,0 +1,71 @@
+package api
+
+import (
+	"time"
+)
+
+// Standard API envelope response format
+type Response struct {
+	ID     *string     `json:"id"`
+	Type   string      `json:"type"`
+	Data   interface{} `json:"data,omitempty"`
+	Errors []Error     `json:"errors,omitempty"`
+}
+
+// Error represents an API error
+type Error struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Field   string `json:"field,omitempty"`
+}
+
+// ErrorResponse represents a single error response
+type ErrorResponse struct {
+	ID      *string `json:"id"`
+	Type    string  `json:"type"`
+	Code    string  `json:"code"`
+	Message string  `json:"message"`
+	Status  int     `json:"status"`
+}
+
+// ValidationErrorDetail represents a single validation error
+type ValidationErrorDetail struct {
+	Field   string      `json:"field"`
+	Message string      `json:"message"`
+	Value   interface{} `json:"value,omitempty"`
+}
+
+// ValidationErrorResponse represents validation errors
+type ValidationErrorResponse struct {
+	ID      *string                  `json:"id"`
+	Type    string                   `json:"type"`
+	Code    string                   `json:"code"`
+	Message string                   `json:"message"`
+	Status  int                      `json:"status"`
+	Errors  []ValidationErrorDetail  `json:"errors"`
+}
+
+// {{.DomainTitle}}Response is the API representation of a {{.DomainLower}}
+type {{.DomainTitle}}Response struct {
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Description     *string    `json:"description,omitempty"`
+	EffectiveStart  time.Time  `json:"effective_start"`
+	EffectiveEnd    time.Time  `json:"effective_end"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// {{.DomainTitle}}CreateRequest represents a create request
+type {{.DomainTitle}}CreateRequest struct {
+	Name           string     `json:"name" validate:"required,min=1,max=255"`
+	Description    *string    `json:"description,omitempty"`
+	EffectiveStart *time.Time `json:"effective_start,omitempty"`
+	EffectiveEnd   *time.Time `json:"effective_end,omitempty"`
+}
+
+// {{.DomainTitle}}UpdateRequest represents an update request
+type {{.DomainTitle}}UpdateRequest struct {
+	Name        *string `json:"name,omitempty" validate:"omitempty,min=1,max=255"`
+	Description *string `json:"description,omitempty"`
+}

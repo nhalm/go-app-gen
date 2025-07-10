@@ -3,6 +3,7 @@ module github.com/nhalm/go-app-gen
 go 1.24.4
 
 require (
+	github.com/jinzhu/inflection v1.0.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.1
 )

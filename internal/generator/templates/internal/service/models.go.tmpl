@@ -1,0 +1,31 @@
+package service
+
+import (
+	"time"
+	"github.com/google/uuid"
+)
+
+// {{.DomainTitle}} represents a {{.DomainLower}} in the service layer
+type {{.DomainTitle}} struct {
+	ID             uuid.UUID
+	Name           string
+	Description    *string
+	EffectiveStart time.Time
+	EffectiveEnd   time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// Create{{.DomainTitle}}Request contains data for creating a {{.DomainLower}}
+type Create{{.DomainTitle}}Request struct {
+	Name           string
+	Description    *string
+	EffectiveStart *time.Time
+	EffectiveEnd   *time.Time
+}
+
+// Update{{.DomainTitle}}Request contains data for updating a {{.DomainLower}}
+type Update{{.DomainTitle}}Request struct {
+	Name        *string
+	Description *string
+}

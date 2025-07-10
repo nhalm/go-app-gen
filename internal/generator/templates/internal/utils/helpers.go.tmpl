@@ -1,0 +1,137 @@
+package utils
+
+import (
+	"context"
+	"strings"
+	"unicode"
+)
+
+// StringPtr returns a pointer to a string
+func StringPtr(s string) *string {
+	return &s
+}
+
+// IntPtr returns a pointer to an int
+func IntPtr(i int) *int {
+	return &i
+}
+
+// BoolPtr returns a pointer to a bool
+func BoolPtr(b bool) *bool {
+	return &b
+}
+
+// NormalizeString normalizes a string for consistent storage
+func NormalizeString(s string) string {
+	// Trim whitespace
+	s = strings.TrimSpace(s)
+
+	// Normalize internal whitespace
+	var result strings.Builder
+	lastWasSpace := false
+
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			if !lastWasSpace {
+				result.WriteRune(' ')
+				lastWasSpace = true
+			}
+		} else {
+			result.WriteRune(r)
+			lastWasSpace = false
+		}
+	}
+
+	return result.String()
+}
+
+// TruncateString truncates a string to a maximum length
+func TruncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+
+	// Find last space before maxLen
+	truncated := s[:maxLen]
+	lastSpace := strings.LastIndex(truncated, " ")
+
+	if lastSpace > 0 && lastSpace > maxLen-20 {
+		return s[:lastSpace] + "..."
+	}
+
+	return truncated + "..."
+}
+
+// ContextWithRequestID adds a request ID to the context
+func ContextWithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, RequestIDKey, requestID)
+}
+
+// SafeDeref safely dereferences a pointer
+func SafeDeref[T any](ptr *T, defaultValue T) T {
+	if ptr == nil {
+		return defaultValue
+	}
+
+	return *ptr
+}
+
+// Filter filters a slice based on a predicate
+func Filter[T any](slice []T, predicate func(T) bool) []T {
+	result := make([]T, 0, len(slice))
+
+	for _, item := range slice {
+		if predicate(item) {
+			result = append(result, item)
+		}
+	}
+
+	return result
+}
+
+// Map transforms a slice using a mapping function
+func Map[T, U any](slice []T, mapper func(T) U) []U {
+	result := make([]U, len(slice))
+	for i, item := range slice {
+		result[i] = mapper(item)
+	}
+
+	return result
+}
+
+// Contains checks if a slice contains a specific element
+func Contains[T comparable](slice []T, element T) bool {
+	for _, item := range slice {
+		if item == element {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Unique removes duplicate elements from a slice
+func Unique[T comparable](slice []T) []T {
+	seen := make(map[T]bool)
+	result := make([]T, 0, len(slice))
+
+	for _, item := range slice {
+		if !seen[item] {
+			seen[item] = true
+			result = append(result, item)
+		}
+	}
+
+	return result
+}
+
+// Coalesce returns the first non-nil value from the provided pointers
+func Coalesce[T any](ptrs ...*T) *T {
+	for _, ptr := range ptrs {
+		if ptr != nil {
+			return ptr
+		}
+	}
+
+	return nil
+}

@@ -1,0 +1,112 @@
+# golangci-lint configuration for go-app-gen
+# Documentation: https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  # Only enable the linters we want - cleaner than enable + disable
+  enable:
+    # Essential linters (always recommended)
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Go vet analysis
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Advanced static analysis
+    - typecheck     # Type checking
+    - unused        # Find unused code
+    
+    # Formatting (keep code clean)
+    - gofmt         # Enforce standard formatting
+    - goimports     # Organize imports
+    
+    # Security (important for production code)
+    - gosec         # Security-focused analysis
+    
+    # Code quality (reasonable checks)
+    - gocritic      # Opinionated checks (with limited scope)
+    - unconvert     # Remove unnecessary type conversions
+    - misspell      # Fix spelling mistakes
+    
+    # Function complexity (reasonable limits)
+    - gocyclo       # Check cyclomatic complexity
+    - funlen        # Enforce function length limits (with generous limits)
+    
+    # Error handling
+    - goerr113      # Go 1.13 error wrapping (older name for main project)
+    
+    # Documentation
+    - godox         # Find TODO, FIXME, etc. comments
+    
+    # Loop issues
+    - exportloopref # Check for loop variable references in goroutines
+    
+    # SQL
+    - sqlclosecheck # Check SQL rows/statements are closed
+    
+    # Linter directives
+    - nolintlint    # Ensure //nolint directives are properly formatted
+
+linters-settings:
+  # Reasonable complexity limits
+  gocyclo:
+    min-complexity: 20  # More generous than default 10
+  
+  # Generous function length limits
+  funlen:
+    lines: 150          # More generous than default 60
+    statements: 80      # More generous than default 40
+  
+  # Line length (modern standard)
+  lll:
+    line-length: 120    # Reasonable for modern screens
+  
+  # Import organization
+  goimports:
+    local-prefixes: github.com/nhalm/go-app-gen
+  
+  # Gocritic with reasonable scope
+  gocritic:
+    enabled-tags:
+      - diagnostic      # Bug detection
+      - performance     # Performance issues
+      - style          # Basic style issues
+    disabled-tags:
+      - experimental    # Too experimental
+      - opinionated     # Too pedantic
+  
+  # Security settings
+  gosec:
+    excludes:
+      - G115  # We handle integer overflow explicitly with comments
+
+issues:
+  # Exclude rules for test files and specific paths
+  exclude-rules:
+    # Tests can be more relaxed
+    - path: _test\.go
+      linters:
+        - funlen
+        - gocyclo
+        - gosec
+    
+    # Generated code can be more relaxed
+    - path: internal/repository/sqlc/
+      linters:
+        - unused
+        - gosec
+    
+    # CLI code can have longer functions
+    - path: cmd/
+      linters:
+        - funlen
+  
+  # Don't fail on common patterns
+  exclude:
+    # Allow TODO comments (they're useful during development)
+    - "TODO"
+    - "FIXME"
+    
+    # Allow some common false positives
+    - "shadow: declaration of \"err\" shadows declaration"

@@ -1,22 +1,11 @@
 package main
 
 import (
-	"context"
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
-
-	"{{.ModuleName}}/cmd/{{.AppName}}/cmd"
+	"{{.ModuleName}}/cmd"
 )
 
 func main() {
-	// Set up signal handling
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	// Execute the root command
-	if err := cmd.ExecuteContext(ctx); err != nil {
-		log.Fatalf("Application failed: %v", err)
+	if err := cmd.Execute(); err != nil {
+		panic(err)
 	}
 }

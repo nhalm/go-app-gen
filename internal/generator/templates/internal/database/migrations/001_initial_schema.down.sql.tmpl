@@ -1,0 +1,8 @@
+-- Drop triggers first
+DROP TRIGGER IF EXISTS update_{{.DomainPluralLower}}_updated_at ON {{.DomainPluralLower}};
+
+-- Drop the table
+DROP TABLE IF EXISTS {{.DomainPluralLower}};
+
+-- Note: We don't remove the applied_time column from schema_migrations
+-- as it might affect other migrations

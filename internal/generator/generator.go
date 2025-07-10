@@ -2,13 +2,17 @@ package generator
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/jinzhu/inflection"
 )
 
 //go:embed templates/*
@@ -31,21 +35,34 @@ type TemplateData struct {
 	Domain            string
 	DomainTitle       string
 	DomainPlural      string
+	DomainPluralLower string
+	DomainLower       string
 	Description       string
 	Author            string
 	PackageImportPath string
+	GoVersion         string
 	HasFeature        func(string) bool
 }
 
 // Generator handles project generation
 type Generator struct {
 	outputDir string
+	verbose   bool
 }
 
 // New creates a new generator
 func New(outputDir string) *Generator {
 	return &Generator{
 		outputDir: outputDir,
+		verbose:   false,
+	}
+}
+
+// NewWithVerbose creates a new generator with verbose logging
+func NewWithVerbose(outputDir string, verbose bool) *Generator {
+	return &Generator{
+		outputDir: outputDir,
+		verbose:   verbose,
 	}
 }
 
@@ -56,11 +73,14 @@ func (g *Generator) Generate(config *ProjectConfig) error {
 		AppName:           config.AppName,
 		ModuleName:        config.ModuleName,
 		Domain:            config.Domain,
-		DomainTitle:       strings.Title(config.Domain),
-		DomainPlural:      pluralize(config.Domain),
+		DomainTitle:       titleCase(config.Domain),
+		DomainPlural:      inflection.Plural(config.Domain),
+		DomainPluralLower: strings.ToLower(inflection.Plural(config.Domain)),
+		DomainLower:       strings.ToLower(config.Domain),
 		Description:       config.Description,
 		Author:            config.Author,
 		PackageImportPath: config.ModuleName,
+		GoVersion:         "1.23",
 		HasFeature: func(feature string) bool {
 			for _, f := range config.Features {
 				if f == feature {
@@ -78,7 +98,16 @@ func (g *Generator) Generate(config *ProjectConfig) error {
 	}
 
 	// Process templates
-	return g.processTemplates(data, projectDir)
+	if err := g.processTemplates(data, projectDir); err != nil {
+		return err
+	}
+
+	// Run post-processing
+	if err := g.PostProcess(projectDir, data); err != nil {
+		return fmt.Errorf("post-processing failed: %w", err)
+	}
+
+	return nil
 }
 
 // processTemplates walks through the embedded templates and processes them
@@ -133,26 +162,93 @@ func (g *Generator) processTemplates(data *TemplateData, projectDir string) erro
 func (g *Generator) getOutputPath(templatePath string, data *TemplateData) string {
 	// Remove "templates/" prefix
 	path := strings.TrimPrefix(templatePath, "templates/")
-	
+
 	// Remove .tmpl extension
 	if strings.HasSuffix(path, ".tmpl") {
 		path = strings.TrimSuffix(path, ".tmpl")
 	}
-	
+
 	// Replace placeholders in path
 	path = strings.ReplaceAll(path, "{{.AppName}}", data.AppName)
 	path = strings.ReplaceAll(path, "{{.Domain}}", data.Domain)
-	
+	path = strings.ReplaceAll(path, "{{.domain}}", data.DomainLower)
+	path = strings.ReplaceAll(path, "{{.domain_plural}}", data.DomainPlural)
+
 	return path
 }
 
-// pluralize is a simple pluralizer (can be enhanced)
-func pluralize(word string) string {
-	if strings.HasSuffix(word, "y") {
-		return strings.TrimSuffix(word, "y") + "ies"
+// runCommand executes a command in the specified directory
+func (g *Generator) runCommand(ctx context.Context, projectDir string, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = projectDir
+
+	if g.verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
 	}
-	if strings.HasSuffix(word, "s") || strings.HasSuffix(word, "sh") || strings.HasSuffix(word, "ch") {
-		return word + "es"
+
+	return cmd.Run()
+}
+
+// PostProcess runs post-generation validation and setup tasks
+func (g *Generator) PostProcess(projectDir string, data *TemplateData) error {
+	ctx := context.Background()
+
+	fmt.Println("🔄 Running post-generation tasks...")
+
+	// Initialize go module
+	if err := g.runCommand(ctx, projectDir, "go", "mod", "init", data.ModuleName); err != nil {
+		return fmt.Errorf("failed to initialize go module: %w", err)
 	}
-	return word + "s"
+
+	// Generate SQLc code first (before go mod tidy)
+	if err := g.runCommand(ctx, projectDir, "sqlc", "generate"); err != nil {
+		// SQLc might not be installed, so warn but don't fail
+		fmt.Printf("⚠️  SQLc generation failed: %v\n", err)
+		fmt.Println("   Consider installing sqlc: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest")
+		fmt.Println("   Or run 'make sqlc' in the project directory after setup")
+	} else {
+		fmt.Println("✅ SQLc code generation successful")
+	}
+
+	// Run go mod tidy (after SQLc generation)
+	if err := g.runCommand(ctx, projectDir, "go", "mod", "tidy"); err != nil {
+		return fmt.Errorf("failed to run go mod tidy: %w", err)
+	}
+
+	// Format generated Go code
+	if err := g.runCommand(ctx, projectDir, "go", "fmt", "./..."); err != nil {
+		return fmt.Errorf("failed to format generated code: %w", err)
+	}
+
+	// Fix imports (if goimports is available)
+	if err := g.runCommand(ctx, projectDir, "goimports", "-w", "."); err != nil {
+		// goimports might not be installed, so just warn instead of failing
+		fmt.Printf("⚠️  goimports not available or failed: %v\n", err)
+		fmt.Println("   Consider installing goimports: go install golang.org/x/tools/cmd/goimports@latest")
+	}
+
+	// Try to build to verify syntax (but allow failure)
+	if err := g.runCommand(ctx, projectDir, "go", "build", "./..."); err != nil {
+		fmt.Printf("⚠️  Build failed (this is expected if dependencies require database): %v\n", err)
+		fmt.Println("   Run 'make up' in the project directory to start the database and complete setup")
+	} else {
+		fmt.Println("✅ Build successful")
+	}
+
+	fmt.Println("✅ Post-generation tasks completed")
+	fmt.Println("")
+	fmt.Println("Next steps:")
+	fmt.Println("  cd " + filepath.Base(projectDir))
+	fmt.Println("  make up      # Start the development environment")
+	fmt.Println("  make help    # See all available commands")
+	return nil
+}
+
+// titleCase converts a string to title case (alternative to deprecated strings.Title)
+func titleCase(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }

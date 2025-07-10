@@ -1,0 +1,46 @@
+-- Create {{.DomainLower}} table with soft delete and temporal fields
+CREATE TABLE IF NOT EXISTS {{.DomainPluralLower}} (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    
+    -- Temporal fields for versioning
+    effective_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    effective_end TIMESTAMPTZ NOT NULL DEFAULT '9999-12-31 23:59:59Z',
+    
+    -- Standard timestamps
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ -- NULL when not deleted (soft delete)
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_{{.DomainPluralLower}}_deleted_at ON {{.DomainPluralLower}}(deleted_at);
+CREATE INDEX idx_{{.DomainPluralLower}}_effective ON {{.DomainPluralLower}}(effective_start, effective_end);
+CREATE INDEX idx_{{.DomainPluralLower}}_created_at ON {{.DomainPluralLower}}(created_at);
+
+-- Add trigger to update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_{{.DomainPluralLower}}_updated_at 
+    BEFORE UPDATE ON {{.DomainPluralLower}} 
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Enhance schema_migrations table if it exists
+DO $$ 
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_name = 'schema_migrations'
+    ) THEN
+        ALTER TABLE schema_migrations 
+        ADD COLUMN IF NOT EXISTS applied_time TIMESTAMPTZ DEFAULT NOW();
+    END IF;
+END $$;

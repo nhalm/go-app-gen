@@ -1,75 +1,88 @@
 # {{.AppName}} Makefile
+# Container-based development environment
 
-.PHONY: build run test clean help dev migrate-up migrate-down
+.PHONY: help
+help: ## Show this help message
+	@echo 'Usage: make [target]'
+	@echo ''
+	@echo 'Targets:'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-# Build the application
-build:
-	go build -o bin/{{.AppName}} ./cmd/{{.AppName}}
+## Development
+.PHONY: dev
+dev: ## Start development server with hot reload
+	docker-compose up dev
 
-# Run the application
-run: build
-	./bin/{{.AppName}} serve
+.PHONY: up
+up: ## Start all services in background
+	docker-compose up -d
 
-# Run in development mode
-dev:
-	go run ./cmd/{{.AppName}} serve
+.PHONY: down
+down: ## Stop all services
+	docker-compose down
 
-# Run tests
-test:
-	go test -v ./...
+.PHONY: logs
+logs: ## Show logs from all services
+	docker-compose logs -f
 
-# Run tests with coverage
-test-coverage:
-	go test -v -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
+## Build & Test
+.PHONY: build
+build: ## Build the application
+	docker-compose run --rm dev go build -v ./cmd/{{.AppName}}
 
-# Clean build artifacts
-clean:
-	rm -rf bin/
-	rm -f coverage.out coverage.html
+.PHONY: test
+test: ## Run all tests with coverage
+	docker-compose run --rm -e GO_ENV=test dev go test -v -race -coverprofile=coverage.out ./...
 
-# Run database migrations up
-migrate-up:
-	go run ./cmd/{{.AppName}} migrate up
+.PHONY: lint
+lint: ## Run linter
+	docker-compose run --rm dev golangci-lint run
 
-# Run database migrations down
-migrate-down:
-	go run ./cmd/{{.AppName}} migrate down
+.PHONY: check
+check: ## Run all checks (format, vet, lint, test)
+	docker-compose run --rm dev go fmt ./...
+	docker-compose run --rm dev go vet ./...
+	docker-compose run --rm dev golangci-lint run
+	docker-compose run --rm -e GO_ENV=test dev go test -v -race -coverprofile=coverage.out ./...
+	@echo "All checks passed!"
 
-# Check migration status
-migrate-status:
-	go run ./cmd/{{.AppName}} migrate status
+## Database
+.PHONY: migrate-up
+migrate-up: ## Run all pending migrations
+	docker-compose --profile tools run --rm migrate
 
-# Format code
-fmt:
-	go fmt ./...
+.PHONY: migrate-create
+migrate-create: ## Create a new migration (usage: make migrate-create name=create_users_table)
+	@if [ -z "$(name)" ]; then echo "Error: name is required. Usage: make migrate-create name=migration_name"; exit 1; fi
+	docker-compose run --rm dev migrate create -ext sql -dir internal/database/migrations -seq $(name)
 
-# Run linting
-lint:
-	golangci-lint run
+.PHONY: sqlc
+sqlc: ## Generate SQLc code
+	docker-compose --profile tools run --rm sqlc
 
-# Tidy dependencies
-tidy:
-	go mod tidy
+.PHONY: db-reset
+db-reset: ## Reset database (drop, create, migrate)
+	docker-compose down -v
+	docker-compose up -d db
+	@echo "Waiting for database to be ready..."
+	@sleep 5
+	$(MAKE) migrate-up
 
-# Install dependencies
-deps:
-	go get ./...
+## Utilities
+.PHONY: shell
+shell: ## Open a shell in the dev container
+	docker-compose run --rm dev /bin/bash
 
-# Help
-help:
-	@echo "Available commands:"
-	@echo "  build         - Build the application"
-	@echo "  run           - Build and run the application"
-	@echo "  dev           - Run in development mode"
-	@echo "  test          - Run tests"
-	@echo "  test-coverage - Run tests with coverage"
-	@echo "  clean         - Clean build artifacts"
-	@echo "  migrate-up    - Run database migrations up"
-	@echo "  migrate-down  - Run database migrations down"
-	@echo "  migrate-status- Check migration status"
-	@echo "  fmt           - Format code"
-	@echo "  lint          - Run linting"
-	@echo "  tidy          - Tidy dependencies"
-	@echo "  deps          - Install dependencies"
-	@echo "  help          - Show this help"
+.PHONY: psql
+psql: ## Open PostgreSQL shell
+	docker-compose exec db psql -U postgres -d {{.AppName}}_dev
+
+.PHONY: clean
+clean: ## Clean build artifacts
+	rm -rf ./cmd/{{.AppName}}/{{.AppName}} coverage.out coverage.html
+
+.PHONY: mod-tidy
+mod-tidy: ## Tidy go modules
+	docker-compose run --rm dev go mod tidy
+
+.DEFAULT_GOAL := help

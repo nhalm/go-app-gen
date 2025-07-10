@@ -1,17 +1,89 @@
 package utils
 
 import (
+	"context"
 	"log/slog"
-	"os"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5/middleware"
 )
 
-// NewLogger creates a new structured logger
-func NewLogger() *slog.Logger {
-	// For now, use a simple text handler
-	// In production, you might want to use JSON format
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+// contextKey is a type for context keys
+type contextKey string
+
+const (
+	// RequestIDKey is the context key for request ID
+	RequestIDKey contextKey = "request_id"
+	// nanosToMillis is the conversion factor from nanoseconds to milliseconds
+	nanosToMillis = 1e6
+)
+
+// GetRequestID retrieves the request ID from context
+func GetRequestID(ctx context.Context) string {
+	if id, ok := ctx.Value(RequestIDKey).(string); ok {
+		return id
+	}
+	// Fall back to chi's request ID
+	return middleware.GetReqID(ctx)
+}
+
+// RequestLoggerMiddleware creates a middleware for single-line request logging
+func RequestLoggerMiddleware() func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+
+			// Wrap response writer to capture status code
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+			// Add request ID to context
+			ctx := r.Context()
+			requestID := middleware.GetReqID(ctx)
+			ctx = context.WithValue(ctx, RequestIDKey, requestID)
+			r = r.WithContext(ctx)
+
+			// Process request
+			next.ServeHTTP(ww, r)
+
+			// Log request (single line)
+			duration := time.Since(start)
+			slog.InfoContext(ctx, "request",
+				slog.String("request_id", requestID),
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+				slog.String("query", r.URL.RawQuery),
+				slog.String("remote_addr", r.RemoteAddr),
+				slog.String("user_agent", r.UserAgent()),
+				slog.Int("status", ww.Status()),
+				slog.Int("bytes", ww.BytesWritten()),
+				slog.Duration("duration", duration),
+				slog.Float64("duration_ms", float64(duration.Nanoseconds())/nanosToMillis),
+			)
+		})
+	}
+}
+
+// ErrorLoggerMiddleware logs errors with context
+func ErrorLoggerMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				ctx := r.Context()
+				requestID := GetRequestID(ctx)
+
+				slog.ErrorContext(ctx, "panic recovered",
+					slog.String("request_id", requestID),
+					slog.Any("error", err),
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+				)
+
+				// Re-panic to let the Recoverer middleware handle it
+				panic(err)
+			}
+		}()
+
+		next.ServeHTTP(w, r)
 	})
-	
-	return slog.New(handler)
 }

@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    env_file:
+      - .env
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: dev
+    volumes:
+      - .:/app
+      - go_cache:/go/pkg/mod
+    ports:
+      - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
+    env_file:
+      - .env
+    environment:
+      # Override for container networking
+      DB_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["reflex", "-c", ".reflex.conf"]
+
+  # Migration runner service
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: dev
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      # Override for container networking
+      DB_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - tools
+    command: ["./cmd/{{.AppName}}/{{.AppName}}", "migrate", "up"]
+
+  # SQLc code generator service
+  sqlc:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: dev
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    profiles:
+      - tools
+    command: ["sqlc", "generate"]
+
+  # Test runner service
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: dev
+    volumes:
+      - .:/app
+      - go_cache:/go/pkg/mod
+    env_file:
+      - .env
+    environment:
+      # Override for container networking
+      DB_HOST: db
+      # Override database name for testing
+      DB_NAME: {{.AppName}}_test
+      GO_ENV: test
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - test
+    command: ["go", "test", "-v", "./..."]
+
+volumes:
+  postgres_data:
+  go_cache:

@@ -1,30 +1,43 @@
 package api
 
 import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"time"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 )
 
 // RegisterRoutes registers all API routes
-func RegisterRoutes(r chi.Router, handler *{{.DomainTitle}}Handler) {
-	// Health check endpoint
-	r.Get("/health", handler.HealthCheck)
-	
-	// API version group
+func RegisterRoutes(r chi.Router, handler *Handler) {
 	r.Route("/api/v1", func(r chi.Router) {
-		// Add middleware for API routes
-		r.Use(middleware.SetHeader("Content-Type", "application/json"))
-		
+		// Health check
+		r.Get("/health", HealthCheck)
+
 		// {{.DomainTitle}} routes
-		r.Route("/{{.DomainPlural}}", func(r chi.Router) {
-			// Add your {{.Domain}} routes here
-			// r.Get("/", handler.List{{.DomainTitle}}s)
-			// r.Post("/", handler.Create{{.DomainTitle}})
-			// r.Route("/{id}", func(r chi.Router) {
-			//     r.Get("/", handler.Get{{.DomainTitle}})
-			//     r.Put("/", handler.Update{{.DomainTitle}})
-			//     r.Delete("/", handler.Delete{{.DomainTitle}})
-			// })
+		r.Route("/{{.DomainPluralLower}}", func(r chi.Router) {
+			r.Get("/", handler.List{{.DomainTitle}}s)
+			r.Post("/", handler.Create{{.DomainTitle}})
+
+			r.Route("/{id}", func(r chi.Router) {
+				r.Get("/", handler.Get{{.DomainTitle}})
+				r.Patch("/", handler.Update{{.DomainTitle}})
+				r.Delete("/", handler.Delete{{.DomainTitle}})
+			})
 		})
 	})
+}
+
+// HealthCheck returns service health status
+func HealthCheck(w http.ResponseWriter, r *http.Request) {
+	response := map[string]string{
+		"status": "healthy",
+		"time":   time.Now().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		slog.Error("Failed to encode health check response", slog.String("error", err.Error()))
+	}
 }

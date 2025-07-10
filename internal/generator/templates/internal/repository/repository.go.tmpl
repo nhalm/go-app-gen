@@ -3,21 +3,90 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.ModuleName}}/internal/repository/sqlc"
 )
 
-// Repository provides data access methods
+var (
+	ErrNotFound = errors.New("{{.DomainLower}} not found")
+)
+
+// Repository implements database operations for {{.DomainPlural}}
 type Repository struct {
-	db *sql.DB
+	db *pgxpool.Pool
+	q  *sqlc.Queries
 }
 
 // New creates a new repository instance
-func New(db *sql.DB) *Repository {
+func New(db *pgxpool.Pool) *Repository {
 	return &Repository{
 		db: db,
+		q:  sqlc.New(db),
 	}
 }
 
-// Ping checks database connectivity
-func (r *Repository) Ping(ctx context.Context) error {
-	return r.db.PingContext(ctx)
+// Create{{.DomainTitle}} creates a new {{.DomainLower}}
+func (r *Repository) Create{{.DomainTitle}}(ctx context.Context, params *sqlc.Create{{.DomainTitle}}Params) (*sqlc.{{.DomainTitle}}, error) {
+	{{.DomainLower}}, err := r.q.Create{{.DomainTitle}}(ctx, *params)
+	if err != nil {
+		return nil, err
+	}
+
+	return &{{.DomainLower}}, nil
+}
+
+// Get{{.DomainTitle}} retrieves a {{.DomainLower}} by ID (current version)
+func (r *Repository) Get{{.DomainTitle}}(ctx context.Context, id uuid.UUID) (*sqlc.{{.DomainTitle}}, error) {
+	{{.DomainLower}}, err := r.q.Get{{.DomainTitle}}(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return &{{.DomainLower}}, nil
+}
+
+// Update{{.DomainTitle}} updates an existing {{.DomainLower}}
+func (r *Repository) Update{{.DomainTitle}}(ctx context.Context, params *sqlc.Update{{.DomainTitle}}Params) (*sqlc.{{.DomainTitle}}, error) {
+	{{.DomainLower}}, err := r.q.Update{{.DomainTitle}}(ctx, *params)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return &{{.DomainLower}}, nil
+}
+
+// SoftDelete{{.DomainTitle}} soft deletes a {{.DomainLower}}
+func (r *Repository) SoftDelete{{.DomainTitle}}(ctx context.Context, id uuid.UUID) error {
+	return r.q.SoftDelete{{.DomainTitle}}(ctx, id)
+}
+
+// List{{.DomainTitle}}s retrieves all {{.DomainPlural}}
+func (r *Repository) List{{.DomainTitle}}s(ctx context.Context) ([]*sqlc.{{.DomainTitle}}, error) {
+	items, err := r.q.List{{.DomainTitle}}s(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to pointers
+	result := make([]*sqlc.{{.DomainTitle}}, len(items))
+	for i := range items {
+		result[i] = &items[i]
+	}
+
+	return result, nil
+}
+
+// GetDB returns the underlying database connection for testing
+func (r *Repository) GetDB() *pgxpool.Pool {
+	return r.db
 }

@@ -1,0 +1,182 @@
+package cmd
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/spf13/cobra"
+	"github.com/nhalm/dbutil"
+)
+
+const (
+	migrationDir = "internal/database/migrations"
+	migrationFilePerms = 0o600
+)
+
+var migrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "Run database migrations",
+	Long:  `Run database migrations for the {{.AppName}} application.`,
+}
+
+func RegisterMigrateCommand(rootCmd *cobra.Command) {
+	migrateCmd.AddCommand(migrateUpCmd)
+	migrateCmd.AddCommand(migrateDownCmd)
+	migrateCmd.AddCommand(migrateVersionCmd)
+	migrateCmd.AddCommand(migrateStatusCmd)
+	migrateCmd.AddCommand(migrateCreateCmd)
+	rootCmd.AddCommand(migrateCmd)
+}
+
+var migrateUpCmd = &cobra.Command{
+	Use:   "up",
+	Short: "Run all pending migrations",
+	RunE:  runMigrateUp,
+}
+
+var migrateDownCmd = &cobra.Command{
+	Use:   "down [n]",
+	Short: "Rollback migrations",
+	Long:  "Rollback n migrations (default 1)",
+	RunE:  runMigrateDown,
+}
+
+var migrateVersionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Show current migration version",
+	RunE:  runMigrateVersion,
+}
+
+var migrateStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show migration status",
+	RunE:  runMigrateStatus,
+}
+
+var migrateCreateCmd = &cobra.Command{
+	Use:   "create [name]",
+	Short: "Create a new migration file",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runMigrateCreate,
+}
+
+func createMigrator() (*migrate.Migrate, error) {
+	dsn := dbutil.GetDSN()
+	m, err := migrate.New(
+		"file://"+migrationDir,
+		dsn,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create migrator: %w", err)
+	}
+	return m, nil
+}
+
+func runMigrateUp(cmd *cobra.Command, args []string) error {
+	slog.Info("Running database migrations...")
+	
+	m, err := createMigrator()
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+	
+	if err := m.Up(); err != nil {
+		if errors.Is(err, migrate.ErrNoChange) {
+			slog.Info("No migrations to run")
+			return nil
+		}
+		return fmt.Errorf("migration failed: %w", err)
+	}
+	
+	slog.Info("Migrations completed successfully")
+	return nil
+}
+
+func runMigrateDown(cmd *cobra.Command, args []string) error {
+	steps := 1
+	if len(args) > 0 {
+		if _, err := fmt.Sscanf(args[0], "%d", &steps); err != nil {
+			return fmt.Errorf("invalid steps parameter: %w", err)
+		}
+	}
+	
+	slog.Info("Rolling back migrations", slog.Int("steps", steps))
+	
+	m, err := createMigrator()
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+	
+	if err := m.Steps(-steps); err != nil {
+		if errors.Is(err, migrate.ErrNoChange) {
+			slog.Info("No migrations to rollback")
+			return nil
+		}
+		return fmt.Errorf("rollback failed: %w", err)
+	}
+	
+	slog.Info("Rollback completed successfully")
+	return nil
+}
+
+func runMigrateVersion(cmd *cobra.Command, args []string) error {
+	m, err := createMigrator()
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+	
+	version, dirty, err := m.Version()
+	if err != nil {
+		if errors.Is(err, migrate.ErrNilVersion) {
+			fmt.Println("No migrations have been applied")
+			return nil
+		}
+		return err
+	}
+	
+	if dirty {
+		fmt.Printf("Version: %d (dirty)\n", version)
+	} else {
+		fmt.Printf("Version: %d\n", version)
+	}
+	
+	return nil
+}
+
+func runMigrateStatus(cmd *cobra.Command, args []string) error {
+	// Similar to version but with more detail
+	return runMigrateVersion(cmd, args)
+}
+
+func runMigrateCreate(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	timestamp := time.Now().Unix()
+	
+	upFile := filepath.Join(migrationDir, 
+		fmt.Sprintf("%d_%s.up.sql", timestamp, name))
+	downFile := filepath.Join(migrationDir, 
+		fmt.Sprintf("%d_%s.down.sql", timestamp, name))
+	
+	// Create up migration
+	if err := os.WriteFile(upFile, []byte("-- "+name+" up\n"), migrationFilePerms); err != nil {
+		return fmt.Errorf("failed to create up migration: %w", err)
+	}
+	
+	// Create down migration
+	if err := os.WriteFile(downFile, []byte("-- "+name+" down\n"), migrationFilePerms); err != nil {
+		return fmt.Errorf("failed to create down migration: %w", err)
+	}
+	
+	fmt.Printf("Created migrations:\n  %s\n  %s\n", upFile, downFile)
+	return nil
+}

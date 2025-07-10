@@ -1,69 +1,294 @@
-// Package api provides HTTP handlers and middleware for the {{.AppName}} API.
-//
-// This package implements a RESTful API that follows clean architecture principles
-// for response formats. All handlers use a consistent approach to validation,
-// error handling, and response formatting.
-//
-// Key components:
-//   - {{.DomainTitle}}Handler: Main handler for processing API requests
-//   - APIResponse: Standard response format for all endpoints
-//   - Middleware: Request logging, authentication and validation
-//
-// The API supports:
-//   - {{.DomainTitle}} management operations
-//   - Health checks and diagnostics
 package api
 
 import (
-	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/render"
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
 	"{{.ModuleName}}/internal/service"
+	"{{.ModuleName}}/internal/utils"
 )
 
-// Version is set at build time using ldflags
-var Version = "dev"
-
-// {{.DomainTitle}}Handler handles HTTP requests for the {{.AppName}} API
-type {{.DomainTitle}}Handler struct {
-	service Service
+// Handler handles HTTP requests for {{.DomainPlural}}
+type Handler struct {
+	service   service.ServiceInterface
+	validator *validator.Validate
 }
 
-// New{{.DomainTitle}}Handler creates a new {{.Domain}} handler
-func New{{.DomainTitle}}Handler(service Service) *{{.DomainTitle}}Handler {
-	return &{{.DomainTitle}}Handler{service: service}
-}
-
-// Service interface defines the service layer methods
-type Service interface {
-	// Add your service methods here
-	GetHealth(ctx context.Context) (*service.HealthStatus, error)
-}
-
-// renderResponse is a helper to render responses with error handling
-func renderResponse(w http.ResponseWriter, r *http.Request, response render.Renderer) {
-	if err := render.Render(w, r, response); err != nil {
-		slog.ErrorContext(r.Context(), "Failed to render response", "error", err)
+// NewHandler creates a new handler instance
+func NewHandler(svc service.ServiceInterface) *Handler {
+	return &Handler{
+		service:   svc,
+		validator: validator.New(),
 	}
 }
 
-// HealthCheck handles health check requests
-func (h *{{.DomainTitle}}Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
+// Create{{.DomainTitle}} handles POST /{{.DomainPlural}}
+func (h *Handler) Create{{.DomainTitle}}(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
-	health, err := h.service.GetHealth(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "Health check failed", "error", err)
-		renderResponse(w, r, NewErrorResponse(http.StatusInternalServerError, "Health check failed"))
+	requestID := utils.GetRequestID(ctx)
+
+	var req {{.DomainTitle}}CreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, r, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
-	
-	renderResponse(w, r, NewSuccessResponse(health))
+
+	if err := h.validator.Struct(req); err != nil {
+		h.sendValidationError(w, r, err)
+		return
+	}
+
+	serviceReq := &service.Create{{.DomainTitle}}Request{
+		Name:           req.Name,
+		Description:    req.Description,
+		EffectiveStart: req.EffectiveStart,
+		EffectiveEnd:   req.EffectiveEnd,
+	}
+
+	{{.DomainLower}}, err := h.service.Create{{.DomainTitle}}(ctx, serviceReq)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			h.sendError(w, r, http.StatusBadRequest, "validation_error", err.Error())
+			return
+		}
+
+		slog.ErrorContext(ctx, "Failed to create {{.DomainLower}}",
+			slog.String("request_id", requestID),
+			slog.String("error", err.Error()))
+		h.sendError(w, r, http.StatusInternalServerError, "internal_error", "Failed to create {{.DomainLower}}")
+		return
+	}
+
+	response := Response{
+		ID:   &requestID,
+		Type: "{{.DomainLower}}",
+		Data: h.toResponse({{.DomainLower}}),
+	}
+
+	h.sendJSON(w, http.StatusCreated, response)
+}
+
+// Get{{.DomainTitle}} handles GET /{{.DomainPlural}}/:id
+func (h *Handler) Get{{.DomainTitle}}(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	requestID := utils.GetRequestID(ctx)
+
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+
+	if err != nil {
+		h.sendError(w, r, http.StatusBadRequest, "invalid_id", "Invalid {{.DomainLower}} ID")
+		return
+	}
+
+	{{.DomainLower}}, err := h.service.Get{{.DomainTitle}}(ctx, id)
+
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			h.sendError(w, r, http.StatusNotFound, "not_found", "{{.DomainTitle}} not found")
+			return
+		}
+
+		slog.ErrorContext(ctx, "Failed to get {{.DomainLower}}",
+			slog.String("request_id", requestID),
+			slog.String("id", id.String()),
+			slog.String("error", err.Error()))
+		h.sendError(w, r, http.StatusInternalServerError, "internal_error", "Failed to get {{.DomainLower}}")
+		return
+	}
+
+	response := Response{
+		ID:   &requestID,
+		Type: "{{.DomainLower}}",
+		Data: h.toResponse({{.DomainLower}}),
+	}
+
+	h.sendJSON(w, http.StatusOK, response)
+}
+
+// Update{{.DomainTitle}} handles PATCH /{{.DomainPlural}}/:id
+func (h *Handler) Update{{.DomainTitle}}(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	requestID := utils.GetRequestID(ctx)
+
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+
+	if err != nil {
+		h.sendError(w, r, http.StatusBadRequest, "invalid_id", "Invalid {{.DomainLower}} ID")
+		return
+	}
+
+	var req {{.DomainTitle}}UpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.sendError(w, r, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	if err := h.validator.Struct(req); err != nil {
+		h.sendValidationError(w, r, err)
+		return
+	}
+
+	serviceReq := &service.Update{{.DomainTitle}}Request{
+		Name:        req.Name,
+		Description: req.Description,
+	}
+
+	{{.DomainLower}}, err := h.service.Update{{.DomainTitle}}(ctx, id, serviceReq)
+
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			h.sendError(w, r, http.StatusNotFound, "not_found", "{{.DomainTitle}} not found")
+			return
+		}
+
+		slog.ErrorContext(ctx, "Failed to update {{.DomainLower}}",
+			slog.String("request_id", requestID),
+			slog.String("id", id.String()),
+			slog.String("error", err.Error()))
+		h.sendError(w, r, http.StatusInternalServerError, "internal_error", "Failed to update {{.DomainLower}}")
+		return
+	}
+
+	response := Response{
+		ID:   &requestID,
+		Type: "{{.DomainLower}}",
+		Data: h.toResponse({{.DomainLower}}),
+	}
+
+	h.sendJSON(w, http.StatusOK, response)
+}
+
+// Delete{{.DomainTitle}} handles DELETE /{{.DomainPlural}}/:id
+func (h *Handler) Delete{{.DomainTitle}}(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	requestID := utils.GetRequestID(ctx)
+
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+
+	if err != nil {
+		h.sendError(w, r, http.StatusBadRequest, "invalid_id", "Invalid {{.DomainLower}} ID")
+		return
+	}
+
+	err = h.service.Delete{{.DomainTitle}}(ctx, id)
+
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			h.sendError(w, r, http.StatusNotFound, "not_found", "{{.DomainTitle}} not found")
+			return
+		}
+
+		slog.ErrorContext(ctx, "Failed to delete {{.DomainLower}}",
+			slog.String("request_id", requestID),
+			slog.String("id", id.String()),
+			slog.String("error", err.Error()))
+		h.sendError(w, r, http.StatusInternalServerError, "internal_error", "Failed to delete {{.DomainLower}}")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// List{{.DomainTitle}}s handles GET /{{.DomainPlural}}
+func (h *Handler) List{{.DomainTitle}}s(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	requestID := utils.GetRequestID(ctx)
+
+	items, err := h.service.List{{.DomainTitle}}s(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to list {{.DomainPlural}}",
+			slog.String("request_id", requestID),
+			slog.String("error", err.Error()))
+		h.sendError(w, r, http.StatusInternalServerError, "internal_error", "Failed to list {{.DomainPlural}}")
+		return
+	}
+
+	// Convert to API responses
+	responseItems := make([]{{.DomainTitle}}Response, len(items))
+	for i, item := range items {
+		responseItems[i] = *h.toResponse(item)
+	}
+
+	response := Response{
+		ID:   nil, // null for arrays
+		Type: "array",
+		Data: responseItems,
+	}
+
+	h.sendJSON(w, http.StatusOK, response)
+}
+
+// Helper methods
+
+func (h *Handler) toResponse({{.DomainLower}} *service.{{.DomainTitle}}) *{{.DomainTitle}}Response {
+	return &{{.DomainTitle}}Response{
+		ID:             {{.DomainLower}}.ID.String(),
+		Name:           {{.DomainLower}}.Name,
+		Description:    {{.DomainLower}}.Description,
+		EffectiveStart: {{.DomainLower}}.EffectiveStart,
+		EffectiveEnd:   {{.DomainLower}}.EffectiveEnd,
+		CreatedAt:      {{.DomainLower}}.CreatedAt,
+		UpdatedAt:      {{.DomainLower}}.UpdatedAt,
+	}
+}
+
+func (h *Handler) sendJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Error("Failed to encode JSON response", slog.String("error", err.Error()))
+	}
+}
+
+func (h *Handler) sendError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	ctx := r.Context()
+	requestID := utils.GetRequestID(ctx)
+
+	errorResponse := ErrorResponse{
+		ID:      &requestID,
+		Type:    "error",
+		Code:    code,
+		Message: message,
+		Status:  status,
+	}
+
+	h.sendJSON(w, status, errorResponse)
+}
+
+func (h *Handler) sendValidationError(w http.ResponseWriter, r *http.Request, err error) {
+	ctx := r.Context()
+	requestID := utils.GetRequestID(ctx)
+
+	validationErrors := make([]ValidationErrorDetail, 0)
+
+	if validatorErr, ok := err.(validator.ValidationErrors); ok {
+		for _, e := range validatorErr {
+			validationErrors = append(validationErrors, ValidationErrorDetail{
+				Field:   e.Field(),
+				Message: e.Tag(),
+				Value:   e.Value(),
+			})
+		}
+	}
+
+	errorResponse := ValidationErrorResponse{
+		ID:      &requestID,
+		Type:    "validation_error",
+		Code:    "validation_failed",
+		Message: "Validation failed",
+		Status:  http.StatusBadRequest,
+		Errors:  validationErrors,
+	}
+
+	h.sendJSON(w, http.StatusBadRequest, errorResponse)
 }

@@ -1,0 +1,187 @@
+package utils
+
+import (
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"unicode/utf8"
+)
+
+const (
+	// MaxNameLength is the maximum allowed length for names
+	MaxNameLength = 255
+	// MaxDescriptionLength is the maximum allowed length for descriptions
+	MaxDescriptionLength = 1000
+	// MinNameLength is the minimum allowed length for names
+	MinNameLength = 1
+)
+
+var (
+	// ErrValidationFailed is returned when validation fails
+	ErrValidationFailed = errors.New("validation failed")
+
+	// Common validation patterns
+	alphanumericPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	emailPattern        = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+)
+
+// ValidationError represents a validation error
+type ValidationError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+	Code    string `json:"code"`
+}
+
+func (e ValidationError) Error() string {
+	return fmt.Sprintf("validation error on field '%s': %s", e.Field, e.Message)
+}
+
+// ValidationErrors is a collection of validation errors
+type ValidationErrors []ValidationError
+
+func (e ValidationErrors) Error() string {
+	if len(e) == 0 {
+		return "no validation errors"
+	}
+
+	if len(e) == 1 {
+		return e[0].Error()
+	}
+
+	var messages []string
+	for _, err := range e {
+		messages = append(messages, err.Error())
+	}
+
+	return fmt.Sprintf("multiple validation errors: %s", strings.Join(messages, "; "))
+}
+
+// ValidateStringLength validates string length constraints
+func ValidateStringLength(value string, field string, minimum, maximum int) *ValidationError {
+	length := utf8.RuneCountInString(value)
+
+	if minimum > 0 && length < minimum {
+		return &ValidationError{
+			Field:   field,
+			Message: fmt.Sprintf("must be at least %d characters long", minimum),
+			Code:    "too_short",
+		}
+	}
+
+	if maximum > 0 && length > maximum {
+		return &ValidationError{
+			Field:   field,
+			Message: fmt.Sprintf("must be no more than %d characters long", maximum),
+			Code:    "too_long",
+		}
+	}
+
+	return nil
+}
+
+// ValidateRequired validates that a required field is not empty
+func ValidateRequired(value string, field string) *ValidationError {
+	if strings.TrimSpace(value) == "" {
+		return &ValidationError{
+			Field:   field,
+			Message: "is required",
+			Code:    "required",
+		}
+	}
+
+	return nil
+}
+
+// ValidateRequiredPtr validates that a required pointer field is not nil or empty
+func ValidateRequiredPtr(s *string, field string) *ValidationError {
+	if s == nil {
+		return &ValidationError{
+			Field:   field,
+			Message: "is required",
+			Code:    "required",
+		}
+	}
+
+	if strings.TrimSpace(*s) == "" {
+		return &ValidationError{
+			Field:   field,
+			Message: "cannot be empty",
+			Code:    "empty",
+		}
+	}
+
+	return nil
+}
+
+// ValidateAlphanumeric validates that a string contains only alphanumeric characters, hyphens, and underscores
+func ValidateAlphanumeric(value string, field string) *ValidationError {
+	if !alphanumericPattern.MatchString(value) {
+		return &ValidationError{
+			Field:   field,
+			Message: "must contain only letters, numbers, hyphens, and underscores",
+			Code:    "invalid_format",
+		}
+	}
+
+	return nil
+}
+
+// ValidateEmail validates email format
+func ValidateEmail(value string, field string) *ValidationError {
+	if !emailPattern.MatchString(value) {
+		return &ValidationError{
+			Field:   field,
+			Message: "must be a valid email address",
+			Code:    "invalid_email",
+		}
+	}
+
+	return nil
+}
+
+// ValidateName validates a name field with common constraints
+func ValidateName(name string, field string) ValidationErrors {
+	var errors ValidationErrors
+
+	if err := ValidateRequired(name, field); err != nil {
+		errors = append(errors, *err)
+		return errors
+	}
+
+	if err := ValidateStringLength(name, field, MinNameLength, MaxNameLength); err != nil {
+		errors = append(errors, *err)
+	}
+
+	return errors
+}
+
+// ValidateDescription validates a description field
+func ValidateDescription(description *string, field string) ValidationErrors {
+	var errors ValidationErrors
+
+	if description == nil {
+		return errors
+	}
+
+	if err := ValidateStringLength(*description, field, 0, MaxDescriptionLength); err != nil {
+		errors = append(errors, *err)
+	}
+
+	return errors
+}
+
+// Validator provides validation functionality
+type Validator struct{}
+
+// NewValidator creates a new validator instance
+func NewValidator() *Validator {
+	return &Validator{}
+}
+
+// ValidateStruct validates a struct using reflection (placeholder for go-playground/validator integration)
+func (v *Validator) Struct(s interface{}) error {
+	// This is a placeholder for actual struct validation
+	// In a real implementation, you would use github.com/go-playground/validator/v10
+	return nil
+}

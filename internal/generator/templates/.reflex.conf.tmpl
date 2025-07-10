@@ -1,0 +1,10 @@
+# Reflex configuration for hot reload
+
+# Watch for changes in Go files
+-r '\.go$' -s -- sh -c 'go build -o ./cmd/{{.AppName}}/{{.AppName}} ./cmd/{{.AppName}} && ./cmd/{{.AppName}}/{{.AppName}} serve'
+
+# Exclude vendor and test files
+-R '^vendor/' -R '_test\.go$'
+
+# Also watch for changes in SQL files (rebuild SQLc)
+-r '\.sql$' -s -- sh -c 'sqlc generate && go build -o ./cmd/{{.AppName}}/{{.AppName}} ./cmd/{{.AppName}} && ./cmd/{{.AppName}}/{{.AppName}} serve'
